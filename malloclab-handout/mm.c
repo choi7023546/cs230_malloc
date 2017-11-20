@@ -194,7 +194,7 @@ void mm_free(void *bp)
 /*
  * mm_realloc - Implemented simply in terms of mm_malloc and mm_free
  */
-void *mm_realloc(void *ptr, size_t size)
+/*void *mm_realloc(void *ptr, size_t size)
 {
     void *oldptr = ptr;
     void *newptr;
@@ -209,7 +209,7 @@ void *mm_realloc(void *ptr, size_t size)
     memcpy(newptr, oldptr, copySize);
     mm_free(oldptr);
     return newptr;
-}
+}*/
 
 static void place(void *bp, size_t asize) 
 {
@@ -241,15 +241,82 @@ static void place(void *bp, size_t asize)
 
 
 
+/*
+ * mm_realloc - Implemented simply in terms of mm_malloc and mm_free
+ */
+void *mm_realloc(void *bp, size_t size)
+{
+     // bp is NULL, equivalent to malloc call
+    if (bp == NULL) {
+       return mm_malloc(size);
+    }
 
+    // size is 0, equivalent to free
+    if (size == 0) {
+        mm_free(bp);
+        return NULL;
+    }
 
+    size_t old_size = GET_SIZE(HDRP(bp));
+    size_t asize, nextblc_size, copy_size;
+    void *oldbp = bp;
+    void *newbp;
 
+    // check whether realloc is shrinking or expanding
+    // get the adjusted size of the request
+    if (size <= DSIZE) {
+        asize = 2*DSIZE;
+    } else {
+        asize = DSIZE * ((size + DSIZE + (DSIZE-1)) / DSIZE);
+    }
 
+    // if the same size
+    if (asize == old_size) {
+        return bp;
+    }
+    // if shrinking
+    if (asize < old_size) {
+        // we split the block if the remainder is big enough
+        if (old_size - asize >= 2*DSIZE) {
+            // shrink the old block
+            PUT(HDRP(bp), PACK(asize, 1));
+            PUT(FTRP(bp), PACK(asize, 1));
+            // construct the new block
+            newbp = NEXT_BLKP(bp);
+            PUT(HDRP(newbp), PACK(old_size - asize, 0));
+            PUT(FTRP(newbp), PACK(old_size - asize, 0));
+        }
+        // otherwise we don't do anything
+        return oldbp;
+    }
 
+    // if expanding
+    else {
+        // we check if we can make the block large enough by
+        // coalescing with the block to its right
+        nextblc_size = GET_SIZE(HDRP(NEXT_BLKP(bp)));
+        if (!GET_ALLOC(HDRP(NEXT_BLKP(bp)))) {
+            if (nextblc_size + old_size >= asize) {
+                // we coalesce
+                // first, delete the next block from free list
+               // delete(NEXT_BLKP(bp));
+                // then we construct a large allocated block
+                PUT(HDRP(bp), PACK(old_size + nextblc_size, 1));
+                PUT(FTRP(bp), PACK(old_size + nextblc_size, 1));
+                return oldbp;
+            }
+        }
 
+        // coalescing with the left won't do any good because
+        // everything still needs to be copied over so in all
+        // other cases, we free the current block and allocate
+        // a new block and copy everything over
+        newbp = mm_malloc(size);
+        copy_size = old_size - DSIZE;
+        memcpy(newbp, oldbp, copy_size);
+        mm_free(bp);
+        return newbp;
+    }
 
-
-
-
-
+}
 
