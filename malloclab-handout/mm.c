@@ -70,18 +70,30 @@ team_t team = {
 #define NEXT_BLKP(bp) ((char *)(bp) + GET_SIZE(((char *)(bp) - WSIZE))) 
 #define PREV_BLKP(bp) ((char *)(bp) - GET_SIZE(((char *)(bp) - DSIZE)))
 
+/* Given block ptr bp, compute address of next and previous free blocks */
+#define NEXT_FBLKP(bp) (*(char **)(bp + WSIZE)) 
+#define PREV_FBLKP(bp) (*(char **)(bp))
+
+/* Given block ptr bp, set previous and next pointers*/
+#define SET_PREV_FBLKP(bp,prev) (*((char **)(bp)) = prev)
+#define SET_NEXT_FBLKP(bp,next) (*((char **)(bp+WSIZE)) = next)
+
+/* marking start of heap_list and free_list  */
 static void* heap_listp = NULL;
+static void* free_listp = NULL;
 
 /* function prototypes for internal helper routines */
 static void *extend_heap(size_t words);
 static void place(void *bp, size_t asize);
 static void *find_fit(size_t asize);
 static void *coalesce(void *bp);
+static void insert(void *bp);
+static void remove(void *bp);
 
 /* 
  * mm_init - initialize the malloc package.
  */
-int mm_init(void)
+int mm_init(void) // no need to change
 {
      /* Create the initial empty heap */
      if ((heap_listp = mem_sbrk(4*WSIZE)) == (void *)-1)
@@ -90,7 +102,7 @@ int mm_init(void)
     PUT(heap_listp + (1*WSIZE), PACK(DSIZE, 1)); /* Prologue header */ 
     PUT(heap_listp + (2*WSIZE), PACK(DSIZE, 1)); /* Prologue footer */ 
     PUT(heap_listp + (3*WSIZE), PACK(0, 1)); /* Epilogue header */ 
-    heap_listp += (2*WSIZE); 
+    free_listp = heap_listp + DSIZE; 
 
     /* Extend the empty heap with a free block of CHUNKSIZE bytes */ 
     if (extend_heap(CHUNKSIZE/WSIZE) == NULL) 
@@ -98,7 +110,7 @@ int mm_init(void)
     return 0; 
 }
 
- static void *extend_heap(size_t words)
+ static void *extend_heap(size_t words) // no need to change
  {  
     char *bp; 
     size_t size; 
@@ -120,7 +132,7 @@ int mm_init(void)
  * mm_malloc - Allocate a block by incrementing the brk pointer.
  *     Always allocate a block whose size is a multiple of the alignment.
  */
-void *mm_malloc(size_t size)
+void *mm_malloc(size_t size) // no need to change
 {
      size_t asize; /* Adjusted block size */ 
      size_t extendsize; /* Amount to extend heap if no fit */ 
@@ -141,17 +153,17 @@ void *mm_malloc(size_t size)
         return bp; }
 
     /* No fit found. Get more memory and place the block */ 
-        extendsize = MAX(asize,CHUNKSIZE); 
-        if ((bp = extend_heap(extendsize/WSIZE)) == NULL) 
-            return NULL; 
-        place(bp, asize); 
-        return bp; 
+    extendsize = MAX(asize,CHUNKSIZE); 
+    if ((bp = extend_heap(extendsize/WSIZE)) == NULL) 
+        return NULL; 
+    place(bp, asize); 
+    return bp; 
 }
 
 /*
  * mm_free - Freeing a block does nothing.
  */
-void mm_free(void *bp)
+void mm_free(void *bp) // no need to change
 {
     size_t size = GET_SIZE(HDRP(bp));
 
@@ -211,6 +223,9 @@ void mm_free(void *bp)
     return newptr;
 }*/
 
+/* we can devide 2 cases. case1 : split free block. remove bp from the free list and insert new free block that splitted 
+case 2 : not split free block. just update size of free block.
+ */
 static void place(void *bp, size_t asize) 
 {
     size_t csize = GET_SIZE(HDRP(bp)); 
@@ -227,12 +242,12 @@ static void place(void *bp, size_t asize)
     }   
 }
 
- static void *find_fit(size_t asize) 
+ static void *find_fit(size_t asize) // modified to explicit free list
  { 
     /* First fit search */ 
      void *bp; 
-     for (bp = heap_listp; GET_SIZE(HDRP(bp)) > 0;  bp = NEXT_BLKP(bp)) {
-        if (!GET_ALLOC(HDRP(bp)) && (asize <= GET_SIZE(HDRP(bp)))) {
+     for (bp = free_listp; bp!=NULL ;  bp = NEXT_FBLKP(bp)) {
+        if ( ( asize <= GET_SIZE(HDRP(bp)) ) ) {
             return bp;
         }
     }
