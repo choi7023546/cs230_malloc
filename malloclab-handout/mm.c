@@ -87,8 +87,8 @@ static void *extend_heap(size_t words);
 static void place(void *bp, size_t asize);
 static void *find_fit(size_t asize);
 static void *coalesce(void *bp);
-static void insert(void *bp);
-static void remove(void *bp);
+static void add_to_list(void *bp);
+static void remove_from_list(void *bp);
 
 /* 
  * mm_init - initialize the malloc package.
@@ -96,7 +96,7 @@ static void remove(void *bp);
 int mm_init(void) // no need to change
 {
      /* Create the initial empty heap */
-     if ((heap_listp = mem_sbrk(4*WSIZE)) == (void *)-1)
+     if ((heap_listp = mem_sbrk(8*WSIZE)) == NULL)
         return -1;
     PUT(heap_listp, 0); /* Alignment padding */ 
     PUT(heap_listp + (1*WSIZE), PACK(DSIZE, 1)); /* Prologue header */ 
@@ -105,7 +105,7 @@ int mm_init(void) // no need to change
     free_listp = heap_listp + DSIZE; 
 
     /* Extend the empty heap with a free block of CHUNKSIZE bytes */ 
-    if (extend_heap(CHUNKSIZE/WSIZE) == NULL) 
+    if (extend_heap(4) == NULL) 
         return -1;
     return 0; 
 }
@@ -118,7 +118,9 @@ int mm_init(void) // no need to change
     size = (words % 2) ? (words+1) * WSIZE : words * WSIZE; 
     if ((long)(bp = mem_sbrk(size)) == -1) 
     return NULL; 
-
+    if (size < 16){
+    size = 16;
+  }
     /* Initialize free block header/footer and the epilogue header */ 
     PUT(HDRP(bp), PACK(size, 0)); /* Free block header */ 
     PUT(FTRP(bp), PACK(size, 0)); /* Free block footer */ 
@@ -133,7 +135,8 @@ int mm_init(void) // no need to change
  *     Always allocate a block whose size is a multiple of the alignment.
  */
 void *mm_malloc(size_t size) // no need to change
-{
+{ 
+    //printf("what" );
      size_t asize; /* Adjusted block size */ 
      size_t extendsize; /* Amount to extend heap if no fit */ 
      char *bp; 
@@ -150,14 +153,16 @@ void *mm_malloc(size_t size) // no need to change
     /* Search the free list for a fit */ 
     if ((bp = find_fit(asize)) != NULL) {
         place(bp, asize); 
-        return bp; }
-
+        return bp; 
+    }
+    //printf("hi");
     /* No fit found. Get more memory and place the block */ 
     extendsize = MAX(asize,CHUNKSIZE); 
     if ((bp = extend_heap(extendsize/WSIZE)) == NULL) 
         return NULL; 
     place(bp, asize); 
     return bp; 
+    //printf("hi2");
 }
 
 /*
@@ -165,43 +170,58 @@ void *mm_malloc(size_t size) // no need to change
  */
 void mm_free(void *bp) // no need to change
 {
+    //printf("hi");
+    if (bp==NULL)
+        return;
     size_t size = GET_SIZE(HDRP(bp));
 
     PUT(HDRP(bp), PACK(size, 0));
     PUT(FTRP(bp), PACK(size, 0));
     coalesce(bp); 
+    //printf("hi");
 }
 
- static void *coalesce(void *bp) 
- { 
-    size_t prev_alloc = GET_ALLOC(FTRP(PREV_BLKP(bp))); 
-    size_t next_alloc = GET_ALLOC(HDRP(NEXT_BLKP(bp))); 
-    size_t size = GET_SIZE(HDRP(bp)); 
+static void *coalesce(void *bp)
+  {
+     size_t prev_alloc = GET_ALLOC(FTRP(PREV_BLKP(bp))) || PREV_BLKP(bp) == bp;
+     size_t next_alloc = GET_ALLOC(HDRP(NEXT_BLKP(bp)));
+     size_t size = GET_SIZE(HDRP(bp));
 
-    if (prev_alloc && next_alloc) { /* Case 1 */  
-    return bp; 
-    } 
+     if (prev_alloc && next_alloc) { /* Case 1 */
+         add_to_list(bp);
+         return bp;
+     }
 
-    else if (prev_alloc && !next_alloc) { /* Case 2 */ 
-    size += GET_SIZE(HDRP(NEXT_BLKP(bp))); 
-    PUT(HDRP(bp), PACK(size, 0)); 
-    PUT(FTRP(bp), PACK(size,0)); 
-    } 
+     else if (prev_alloc && !next_alloc) { /* Case 2 */
+     size += GET_SIZE(HDRP(NEXT_BLKP(bp)));
+     remove_from_list(NEXT_BLKP(bp));
+     PUT(HDRP(bp), PACK(size, 0));
+     PUT(FTRP(bp), PACK(size,0));
+     add_to_list(bp);
+     return bp;
+     }
 
-    else if (!prev_alloc && next_alloc) { /* Case 3 */ 
-    size += GET_SIZE(HDRP(PREV_BLKP(bp))); 
-    PUT(FTRP(bp), PACK(size, 0)); 
-    PUT(HDRP(PREV_BLKP(bp)), PACK(size, 0)); 
-    bp = PREV_BLKP(bp); 
-    } 
+     else if (!prev_alloc && next_alloc) { /* Case 3 */
+     size += GET_SIZE(HDRP(PREV_BLKP(bp)));
+     remove_from_list(PREV_BLKP(bp));
+     PUT(FTRP(bp), PACK(size, 0));
+     PUT(HDRP(PREV_BLKP(bp)), PACK(size, 0));
+     bp = PREV_BLKP(bp);
+     add_to_list(bp);
+     return bp;
+     }
 
-    else { /* Case 4 */ 
-    size += GET_SIZE(HDRP(PREV_BLKP(bp))) + GET_SIZE(FTRP(NEXT_BLKP(bp))); 
-    PUT(HDRP(PREV_BLKP(bp)), PACK(size, 0)); 
-    PUT(FTRP(NEXT_BLKP(bp)), PACK(size, 0)); 
-    bp = PREV_BLKP(bp); } 
-    return bp;
-}
+     else { /* Case 4 */
+     size += GET_SIZE(HDRP(PREV_BLKP(bp))) + GET_SIZE(FTRP(NEXT_BLKP(bp)));
+     remove_from_list(PREV_BLKP(bp));
+     remove_from_list(NEXT_BLKP(bp));
+     PUT(HDRP(PREV_BLKP(bp)), PACK(size, 0));
+     PUT(FTRP(NEXT_BLKP(bp)), PACK(size, 0));
+     bp = PREV_BLKP(bp);
+     add_to_list(bp);
+     return bp;
+     }
+ }
 
 /*
  * mm_realloc - Implemented simply in terms of mm_malloc and mm_free
@@ -227,31 +247,51 @@ void mm_free(void *bp) // no need to change
 case 2 : not split free block. just update size of free block.
  */
 static void place(void *bp, size_t asize) 
-{
+{   
+    //printf("hi");
     size_t csize = GET_SIZE(HDRP(bp)); 
     if ((csize - asize) >= (2*DSIZE)) {
         PUT(HDRP(bp), PACK(asize, 1));
-        PUT(FTRP(bp), PACK(asize, 1)); 
+        PUT(FTRP(bp), PACK(asize, 1));
+        remove_from_list(bp);
         bp = NEXT_BLKP(bp); 
         PUT(HDRP(bp), PACK(csize-asize, 0)); 
         PUT(FTRP(bp), PACK(csize-asize, 0)); 
+        coalesce(bp);
     } 
     else {
         PUT(HDRP(bp), PACK(csize, 1)); 
-        PUT(FTRP(bp), PACK(csize, 1));  
-    }   
+        PUT(FTRP(bp), PACK(csize, 1)); 
+        remove_from_list(bp); 
+    }
+    //printf("hi");   
 }
 
  static void *find_fit(size_t asize) // modified to explicit free list
  { 
-    /* First fit search */ 
-     void *bp; 
-     for (bp = free_listp; bp!=NULL ;  bp = NEXT_FBLKP(bp)) {
-        if ( ( asize <= GET_SIZE(HDRP(bp)) ) ) {
-            return bp;
-        }
+
+    void *bp;
+  static int last_malloced_size = 0;
+  static int repeat_counter = 0;
+  if( last_malloced_size == (int)asize){
+      if(repeat_counter>30){  
+        int extendsize = MAX(asize, 4 * WSIZE);
+        bp = extend_heap(extendsize/4);
+        return bp;
+      }
+      else
+        repeat_counter++;
+  }
+  else
+    repeat_counter = 0;
+  for (bp = free_listp; GET_ALLOC(HDRP(bp)) == 0; bp = NEXT_FBLKP(bp) ){
+    if (asize <= (size_t)GET_SIZE(HDRP(bp)) ) {
+      last_malloced_size = asize;
+      return bp;
     }
-    return NULL; /* No fit */
+  }
+  return NULL;
+
 }
 
 
@@ -259,79 +299,100 @@ static void place(void *bp, size_t asize)
 /*
  * mm_realloc - Implemented simply in terms of mm_malloc and mm_free
  */
-void *mm_realloc(void *bp, size_t size)
-{
-     // bp is NULL, equivalent to malloc call
-    if (bp == NULL) {
-       return mm_malloc(size);
-    }
+void *mm_realloc(void *bp, size_t size){
 
-    // size is 0, equivalent to free
-    if (size == 0) {
-        mm_free(bp);
-        return NULL;
-    }
+  if((int)size < 0) 
 
-    size_t old_size = GET_SIZE(HDRP(bp));
-    size_t asize, nextblc_size, copy_size;
-    void *oldbp = bp;
-    void *newbp;
+    return NULL; 
 
-    // check whether realloc is shrinking or expanding
-    // get the adjusted size of the request
-    if (size <= DSIZE) {
-        asize = 2*DSIZE;
-    } else {
-        asize = DSIZE * ((size + DSIZE + (DSIZE-1)) / DSIZE);
-    }
+  else if((int)size == 0){ 
 
-    // if the same size
-    if (asize == old_size) {
-        return bp;
-    }
-    // if shrinking
-    if (asize < old_size) {
-        // we split the block if the remainder is big enough
-        if (old_size - asize >= 2*DSIZE) {
-            // shrink the old block
-            PUT(HDRP(bp), PACK(asize, 1));
-            PUT(FTRP(bp), PACK(asize, 1));
-            // construct the new block
-            newbp = NEXT_BLKP(bp);
-            PUT(HDRP(newbp), PACK(old_size - asize, 0));
-            PUT(FTRP(newbp), PACK(old_size - asize, 0));
-        }
-        // otherwise we don't do anything
-        return oldbp;
-    }
+    mm_free(bp); 
 
-    // if expanding
-    else {
-        // we check if we can make the block large enough by
-        // coalescing with the block to its right
-        nextblc_size = GET_SIZE(HDRP(NEXT_BLKP(bp)));
-        if (!GET_ALLOC(HDRP(NEXT_BLKP(bp)))) {
-            if (nextblc_size + old_size >= asize) {
-                // we coalesce
-                // first, delete the next block from free list
-               // delete(NEXT_BLKP(bp));
-                // then we construct a large allocated block
-                PUT(HDRP(bp), PACK(old_size + nextblc_size, 1));
-                PUT(FTRP(bp), PACK(old_size + nextblc_size, 1));
-                return oldbp;
-            }
-        }
+    return NULL; 
 
-        // coalescing with the left won't do any good because
-        // everything still needs to be copied over so in all
-        // other cases, we free the current block and allocate
-        // a new block and copy everything over
-        newbp = mm_malloc(size);
-        copy_size = old_size - DSIZE;
-        memcpy(newbp, oldbp, copy_size);
-        mm_free(bp);
-        return newbp;
-    }
+  } 
+
+  else if(size > 0){ 
+
+      size_t oldsize = GET_SIZE(HDRP(bp)); 
+
+      size_t newsize = size + 2 * WSIZE; // 2 words for header and footer
+
+      /*if newsize is less than oldsize then we just return bp */
+
+      if(newsize <= oldsize){ 
+
+          return bp; 
+
+      }
+
+      /*if newsize is greater than oldsize */ 
+
+      else { 
+
+          size_t next_alloc = GET_ALLOC(HDRP(NEXT_BLKP(bp))); 
+
+          size_t csize;
+
+          /* next block is free and the size of the two blocks is greater than or equal the new size  */ 
+
+          /* then we only need to combine both the blocks  */ 
+
+          if(!next_alloc && ((csize = oldsize + GET_SIZE(  HDRP(NEXT_BLKP(bp))  ))) >= newsize){ 
+
+            remove_from_list(NEXT_BLKP(bp)); 
+
+            PUT(HDRP(bp), PACK(csize, 1)); 
+
+            PUT(FTRP(bp), PACK(csize, 1)); 
+
+            return bp; 
+
+          }
+
+          else {  
+
+            void *new_ptr = mm_malloc(newsize);  
+
+            place(new_ptr, newsize);
+
+            memcpy(new_ptr, bp, newsize); 
+
+            mm_free(bp); 
+
+            return new_ptr; 
+
+          } 
+
+      }
+
+  }else 
+
+    return NULL;
+
+} 
+
+
+
+static void add_to_list(void *bp){
+    SET_PREV_FBLKP(free_listp, bp);
+    SET_NEXT_FBLKP(bp, free_listp);
+    SET_PREV_FBLKP(bp,NULL);
+    free_listp = bp;
+}
+
+static void remove_from_list(void *bp) {
+ if (!PREV_FBLKP(bp)) {
+     SET_PREV_FBLKP( NEXT_FBLKP(bp), NULL );
+     free_listp = NEXT_FBLKP(bp);
+ }
+ else {
+     SET_PREV_FBLKP( NEXT_FBLKP(bp), PREV_FBLKP(bp) );
+     SET_NEXT_FBLKP( PREV_FBLKP(bp), NEXT_FBLKP(bp) );
+ }
+
+
 
 }
 
