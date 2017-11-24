@@ -47,7 +47,7 @@ team_t team = {
 /* Basic constants and macros */ 
 #define WSIZE 4 /* Word and header/footer size (bytes) */ 
 #define DSIZE 8 /* Double word size (bytes) */ 
-#define CHUNKSIZE (1<<12) /* Extend heap by this amount (bytes) */ 
+#define CHUNKSIZE (1<<13) /* Extend heap by this amount (bytes) */ 
 
 #define MAX(x, y) ((x) > (y)? (x) : (y))
 
@@ -279,489 +279,73 @@ static void place(void *bp, size_t asize)
     return NULL;
 }
 
+void *mm_realloc(void *bp, size_t size){
+  
+  if (bp == NULL) {
+    return mm_malloc(size); 
+  }
+  if ( (int)size < 0 ) 
+    return NULL; 
 
+  else if( (int)size == 0 ){ 
 
-void *mm_realloc(void *ptr, size_t size)
+    mm_free(bp);
+    return NULL; 
 
-{
+  } 
 
-    void *oldptr = ptr;
+  else if (size > 0){ 
 
-    void *newptr;
+      size_t oldsize = GET_SIZE(HDRP(bp)); 
+      size_t newsize = size + 2 * WSIZE; // 2 words for header and footer
+      /*if newsize is less than oldsize then we just return bp */
+      if(newsize <= oldsize){ 
+          return bp; 
+      }
 
-    void *temp;
+      /*if newsize is greater than oldsize */ 
+      else { 
+          size_t next_alloc = GET_ALLOC(HDRP(NEXT_BLKP(bp))); 
+         // size_t prev_alloc = GET_ALLOC(HDRP(PREV_BLKP(bp)));
+          size_t csize;
+          /* next block is free and the size of the two blocks is greater than or equal the new size  */ 
+          /* then we only need to combine both the blocks  */ 
 
-    size_t tempsize;
+          if( !next_alloc && ( (csize = oldsize + GET_SIZE(  HDRP( NEXT_BLKP(bp) )  ) ) ) >= newsize){ 
+            remove_from_list(NEXT_BLKP(bp)); 
+            PUT(HDRP(bp), PACK(csize, 1)); 
+            PUT(FTRP(bp), PACK(csize, 1)); 
+            return bp; 
 
-    size_t copySize;
+          } /* else if ( !prev_alloc && ( (csize = oldsize + GET_SIZE( HDRP(PREV_BLKP(bp) ) ) ) ) >= newsize ) {
+            void *new_ptr = PREV_BLKP(bp);
+            mm_free(bp);
+            place(new_ptr,newsize);
+            memcpy(new_ptr,bp,newsize);
+            return new_ptr;  
+          } */
 
-    
+          else {  
 
-    //get allocation status of next and previous free blocks.  
+            void *new_ptr = mm_malloc(newsize);  
 
-    size_t prev_alloc = GET_ALLOC(FTRP(PREV_BLKP(oldptr)));
+            place(new_ptr, newsize);
 
-    size_t next_alloc = GET_ALLOC(HDRP(NEXT_BLKP(oldptr)));
+            memcpy(new_ptr, bp, newsize); 
 
-    
+            mm_free(bp); 
 
-    //get size of the current block
+            return new_ptr; 
 
-    size_t size_prev = GET_SIZE(HDRP(oldptr));
+          } 
 
-    int increase;
+      }
 
-    
+  }else 
 
-    //decide if the new size constitutes and increase or not
+    return NULL;
 
-    if(size_prev  < size + DSIZE) 
-
-            increase = 1;
-
-    else
-
-            increase = 0;
-
-    
-
-    //if size is equal to zero, the call is equivalent to mm free(ptr)
-
-    if (size == 0){
-
-    mm_free(ptr);
-
-        newptr = 0;
-
-        return NULL;
-
-    }
-
-    
-
-    //if ptr is NULL, the call is equivalent to mm malloc(size)
-
-    if (oldptr == NULL) 
-
-    return mm_malloc(size);
-
-
-
-    // if shrinking ptr and released space will be large enough to be a block then shrink allocated block and create new block.  
-
-    if(increase == 0 && (size_prev - size - DSIZE) > (2*DSIZE)){ 
-
-            
-
-        // Adjust block size to include overhead and alignment reqs.
-
-        if (size <= DSIZE)
-
-                size = 2*DSIZE;
-
-         else
-
-        size =  DSIZE * ((size + (DSIZE) + (DSIZE-1)) / DSIZE); // align size
-
-    
-
-    //if the adjusted size still leaves enough space for a free block continue with creating new free block and shrunk allocated block. 
-
-    if((size_prev - size) > (2*DSIZE)){
-
-
-
-     //reset header and footer of old block for the new (shrunk) size
-
-         PUT(HDRP(oldptr), PACK(size, 1)); 
-
-     PUT(FTRP(oldptr), PACK(size, 1)); 
-
-     
-
-     // set new ptr to old ptr
-
-     newptr = oldptr;
-
-     
-
-     // reset old pointer to the new (empty) block
-
-     oldptr =  (NEXT_BLKP(newptr)); 
-
-     
-
-     //set header and footer for new (empty) block with remaining size
-
-     PUT(HDRP(oldptr), PACK(size_prev - size, 0));
-
-     PUT(FTRP(oldptr), PACK(size_prev - size, 0));
-
-    
-
-    //coalesce new (free) block (adds to free list)
-
-    coalesce(oldptr);
-
-    
-
-    //return pointer to shurnk block
-
-    return newptr;
-
-    }
-
-    }
-
-    
-
-    //if shrinking ptr and released space too small to be a block or size is the same return same ptr because no change is necessary 
-
-    if(increase == 0) {
-
-            return ptr;
-
-    }
-
-    
-
-    // else if expanding ptr 
-
-    else {
-
-            
-
-            //if next and prev are unallocated and combining the three blocks would fufill new size requirement merge blocks.
-
-            if (next_alloc == 0 && prev_alloc == 0 && ((GET_SIZE(HDRP(PREV_BLKP(oldptr)))) + (GET_SIZE(HDRP(NEXT_BLKP(oldptr)))) + size_prev) >= (size + DSIZE)){
-
-                    
-
-                    //set new ptr to the prev block since this will be the address of the expanded block.  
-
-                newptr = PREV_BLKP(oldptr);
-
-                
-
-                //temp set to next block.
-
-                temp = NEXT_BLKP(oldptr);
-
-                
-
-                //temp size is size of next and prev blocks -- ie the added size to the current block.
-
-                    tempsize = GET_SIZE(FTRP(newptr)) + GET_SIZE(FTRP(temp));
-
-                    
-
-                    //remove next block and previous block from the free list since they will no longer exist.  
-
-                    remove_from_list(PREV_BLKP(oldptr));
-
-                    remove_from_list(NEXT_BLKP(oldptr));
-
-                    
-
-                    // Adjust block size to include overhead and alignment reqs.
-
-                    if (size <= DSIZE)
-
-                        size = 2*DSIZE;
-
-            else
-
-                size =  DSIZE * ((size + (DSIZE) + (DSIZE-1)) / DSIZE); 
-
-        
-
-            // if not big enough for new free block make new block take all space
-
-                    if((tempsize + size_prev) < (size + 2*DSIZE))
-
-                         size = tempsize + size_prev;
-
-                 
-
-                //set header to reflect new (expanded) size.
-
-                    PUT(HDRP(newptr), PACK(size, 1));
-
-                    
-
-                    // calculate copy size and copy memory from old block to new (expanded) block
-
-                    copySize = GET_SIZE(HDRP(oldptr));
-
-                    memcpy(newptr, oldptr, copySize);
-
-                    
-
-                    //set footer to reflect new (expanded) size. 
-
-                    PUT(FTRP(newptr), PACK(size, 1));
-
-                                
-
-                    //if new free block initialize i
-
-                    if((tempsize + size_prev) >= (size + 2*DSIZE)){ 
-
-                
-
-                            // set new pointer to the new (empty) block
-
-                            temp = NEXT_BLKP(newptr); 
-
-                            
-
-                            // set header and foot for new (empty) block with remaining size
-
-                PUT(HDRP(temp), PACK(tempsize + size_prev - size, 0));
-
-                PUT(FTRP(temp), PACK(tempsize + size_prev - size, 0));
-
-
-
-                //add new (free) block to the free list
-
-                add_to_list(temp);
-
-                    }
-
-                    //return expanded block.
-
-                    return newptr;                      
-
-            }           
-
-            
-
-            //if next is unallocated and combining next with this block would fufill new size requirement merge the blocks
-
-            else if(next_alloc == 0 && ((GET_SIZE(HDRP(NEXT_BLKP(oldptr)))) + size_prev) >= (size + DSIZE)){
-
-                    
-
-                    //temp set to next block
-
-                    temp = NEXT_BLKP(oldptr);
-
-                    
-
-                    //temp size is size of next block
-
-                    tempsize = GET_SIZE(FTRP(temp));
-
-                    
-
-                    //remove next block from the free list since it will no longer exist. 
-
-                    remove_from_list(NEXT_BLKP(ptr));
-
-                    
-
-                    // Adjust block size to include overhead and alignment reqs.
-
-                    if (size <= DSIZE)
-
-                        size = 2*DSIZE;
-
-            else
-
-                size =  DSIZE * ((size + (DSIZE) + (DSIZE-1)) / DSIZE);
-
-        
-
-                // if not big enough for new free block make new block take all space
-
-                    if((tempsize + size_prev) < (size + 2*DSIZE)) 
-
-                         size = tempsize + size_prev;
-
-                
-
-                    //set header and footer for block to reflect new (expanded) sizes
-
-                    PUT(HDRP(oldptr), PACK(size, 1));
-
-                    PUT(FTRP(oldptr), PACK(size, 1)); 
-
-                    
-
-                    //if new free block initialize it
-
-                    if((tempsize + size_prev) >= (size + 2*DSIZE)){ 
-
-                            
-
-                // set new pointer to the new (empty) block
-
-                            newptr = NEXT_BLKP(oldptr);
-
-                            
-
-                            // set header and foot for new (empty) block with remaining size
-
-                PUT(HDRP(newptr), PACK(tempsize + size_prev - size, 0));
-
-                PUT(FTRP(newptr), PACK(tempsize + size_prev - size, 0));
-
-                
-
-                //add new (free) block to the free list
-
-                add_to_list(newptr);
-
-                    }
-
-                    //return expanded block.
-
-                    return oldptr;                  
-
-            }
-
-            
-
-            //if prev is unallocated and combining prev with this block would fufill new size requirement merge the blocks
-
-            else if(prev_alloc == 0 && ((GET_SIZE(HDRP(PREV_BLKP(oldptr)))) + size_prev) >= (size + DSIZE)){
-
-                    
-
-                    //set new ptr to the prev block since this will be the address of the expanded block.  
-
-                    newptr = PREV_BLKP(oldptr);
-
-                    
-
-                    //tempsize is size of prev block. 
-
-                    tempsize = GET_SIZE(FTRP(newptr));
-
-                    
-
-                    //remove prev block from the free list
-
-                    remove_from_list(PREV_BLKP(oldptr));
-
-                    
-
-                    // Adjust block size to include overhead and alignment reqs.
-
-                    if (size <= DSIZE)
-
-                        size = 2*DSIZE;
-
-            else
-
-                size =  DSIZE * ((size + (DSIZE) + (DSIZE-1)) / DSIZE);
-
-        
-
-            // if not big enough for new free block make new block take all space
-
-                    if((tempsize + size_prev) < (size + 2*DSIZE))
-
-                         size = tempsize + size_prev;
-
-                
-
-                    //set header to reflect new (expanded) size.
-
-                    PUT(HDRP(newptr), PACK(size, 1)); 
-
-                    
-
-                    // calculate copy size and copy memory from old block to new (expanded) block
-
-                    copySize = GET_SIZE(HDRP(oldptr));
-
-                    memcpy(newptr, oldptr, copySize);
-
-                    
-
-                    //set footer to reflect new (expanded) size.
-
-                    PUT(FTRP(newptr), PACK(size, 1)); // resize old 
-
-                    
-
-                    //if new free block initialize it
-
-                    if((tempsize + size_prev) >= (size + 2*DSIZE)){
-
-                            
-
-                            // set new pointer to the new (empty) block
-
-                temp = NEXT_BLKP(newptr);
-
-                
-
-                // set header and foot for new (empty) block with remaining size
-
-                PUT(HDRP(temp), PACK(tempsize + size_prev - size, 0));
-
-                PUT(FTRP(temp), PACK(tempsize + size_prev - size, 0));
-
-                
-
-                //add new (free) block to the free list
-
-                add_to_list(temp);
-
-                    }
-
-                    //return expanded block.
-
-                    return newptr;      
-
-            }
-
-
-
-            //else if next and previous blocks are allocated -- default case
-
-            
-
-            //set new pointer to newly allocated block of size
-
-            newptr = mm_malloc(size);
-
-            
-
-            //calculate copy size with a maximum of size.  (size should never be less than copySize but left in for safety)
-
-            copySize = GET_SIZE(HDRP(oldptr));
-
-        if (size < copySize)
-
-            copySize = size;
-
-        
-
-        //copy memory to new block
-
-        memcpy(newptr, oldptr, copySize);
-
-        
-
-        //free old memory block
-
-        mm_free(oldptr);
-
-        
-
-        //return new memory block.
-
-        return newptr;
-
-    }
-
-}
-
-
+} 
 
 static void add_to_list(void *bp){
     SET_PREV_FBLKP(free_listp, bp);
@@ -770,17 +354,21 @@ static void add_to_list(void *bp){
     free_listp = bp;
 }
 
+
+
 static void remove_from_list(void *bp) {
- if (!PREV_FBLKP(bp)) {
-     SET_PREV_FBLKP( NEXT_FBLKP(bp), NULL );
-     free_listp = NEXT_FBLKP(bp);
+
+    void *prev = PREV_FBLKP(bp);
+    void *next = NEXT_FBLKP(bp);
+    if (prev==NULL && next!=NULL) {
+        SET_PREV_FBLKP(next,NULL);
+        free_listp = next;
+    } else if (prev!=NULL) {
+       SET_PREV_FBLKP( NEXT_FBLKP(bp), PREV_FBLKP(bp) );
+       SET_NEXT_FBLKP( PREV_FBLKP(bp), NEXT_FBLKP(bp) );
+    } else {
+        free_listp = NULL;
+    }
+
  }
- else {
-     SET_PREV_FBLKP( NEXT_FBLKP(bp), PREV_FBLKP(bp) );
-     SET_NEXT_FBLKP( PREV_FBLKP(bp), NEXT_FBLKP(bp) );
- }
-
-
-
-}
 
