@@ -89,7 +89,7 @@ static void *find_fit(size_t asize);
 static void *coalesce(void *bp);
 static void add_to_list(void *bp);
 static void remove_from_list(void *bp);
-
+int heap_checker(void);
 /* 
  * mm_init - initialize the malloc package.
  */
@@ -161,6 +161,7 @@ void *mm_malloc(size_t size) // no need to change
     if ((bp = extend_heap(extendsize/WSIZE)) == NULL) 
         return NULL; 
     place(bp, asize); 
+    //heap_checker();
     return bp; 
     //printf("hi2");
 }
@@ -177,21 +178,22 @@ void mm_free(void *bp) // no need to change
     // make initial block to a free block.
     PUT(HDRP(bp), PACK(size, 0));
     PUT(FTRP(bp), PACK(size, 0));
-    // if before and after blocks are free, coalescing them.
+    // if previous and next blocks are free, coalescing them.
     coalesce(bp); 
     //printf("hi");
 }
 
+/*if previous and next blocks are free, merge them into one free block. */
 static void *coalesce(void *bp)
   {
      size_t prev_alloc = GET_ALLOC(FTRP(PREV_BLKP(bp))) || PREV_BLKP(bp) == bp;
      size_t next_alloc = GET_ALLOC(HDRP(NEXT_BLKP(bp)));
      size_t size = GET_SIZE(HDRP(bp));
 
-     if (prev_alloc && next_alloc) /* Case 1 */
+     if (prev_alloc && next_alloc) /* Case 1 : before and after block is allocated */ 
          add_to_list(bp);
 
-     else if (prev_alloc && !next_alloc) { /* Case 2 */
+     else if (prev_alloc && !next_alloc) { /* Case 2 : next block is a free block */
      size += GET_SIZE(HDRP(NEXT_BLKP(bp)));
      remove_from_list(NEXT_BLKP(bp));
      PUT(HDRP(bp), PACK(size, 0));
@@ -199,7 +201,7 @@ static void *coalesce(void *bp)
      add_to_list(bp);
      }
 
-     else if (!prev_alloc && next_alloc) { /* Case 3 */
+     else if (!prev_alloc && next_alloc) { /* Case 3 : previous block is a free block */
      size += GET_SIZE(HDRP(PREV_BLKP(bp)));
      remove_from_list(PREV_BLKP(bp));
      PUT(FTRP(bp), PACK(size, 0));
@@ -208,7 +210,7 @@ static void *coalesce(void *bp)
      add_to_list(bp);
      }
 
-     else { /* Case 4 */
+     else { /* Case 4 : previous and next blocks are free blocks*/
      size += GET_SIZE(HDRP(PREV_BLKP(bp))) + GET_SIZE(FTRP(NEXT_BLKP(bp)));
      remove_from_list(PREV_BLKP(bp));
      remove_from_list(NEXT_BLKP(bp));
@@ -217,30 +219,11 @@ static void *coalesce(void *bp)
      bp = PREV_BLKP(bp);
      add_to_list(bp);
      }
-
+    // return updated block pointer
      return bp;
  }
 
 
-/*
- * mm_realloc - Implemented simply in terms of mm_malloc and mm_free
- */
-/*void *mm_realloc(void *ptr, size_t size)
-{
-    void *oldptr = ptr;
-    void *newptr;
-    size_t copySize;
-    
-    newptr = mm_malloc(size);
-    if (newptr == NULL)
-      return NULL;
-    copySize = *(size_t *)((char *)oldptr - SIZE_T_SIZE);
-    if (size < copySize)
-      copySize = size;
-    memcpy(newptr, oldptr, copySize);
-    mm_free(oldptr);
-    return newptr;
-}*/
 
 /* we can devide 2 cases. case1 : split free block. remove bp from the free list and insert new free block that splitted 
 case 2 : not split free block. just update size of free block.
@@ -249,11 +232,13 @@ static void place(void *bp, size_t asize)
 {   
     //printf("hi");
     size_t csize = GET_SIZE(HDRP(bp)); 
+    // case 2 : we don't need to split into 2 blocks
     if((csize-asize) < (2*DSIZE)){
         PUT(HDRP(bp), PACK(csize, 1)); 
         PUT(FTRP(bp), PACK(csize, 1)); 
         remove_from_list(bp); 
     }
+    // case 1: it is enough to split and make another free block.
     else{
         PUT(HDRP(bp), PACK(asize, 1));
         PUT(FTRP(bp), PACK(asize, 1));
@@ -267,7 +252,7 @@ static void place(void *bp, size_t asize)
     //printf("hi");   
 }
 
- static void *find_fit(size_t asize) // modified to explicit free list
+ static void *find_fit(size_t asize)
  {
     void *bp;
     for (bp = free_listp; GET_ALLOC(HDRP(bp)) == 0; bp = NEXT_FBLKP(bp) ){
@@ -279,6 +264,10 @@ static void place(void *bp, size_t asize)
     return NULL;
 }
 
+/* case1 : newsize is smaller than oldsize. Then, se return just old bp
+   case2 : new size is bigger than oldsize. We can do two things. First, check the next block and if it is not allocated, we can merge current and next block and 
+            place newsize of block. Second, allocate new size of block to other address of heap and return a new pointer.
+ */ 
 void *mm_realloc(void *bp, size_t size){
   if (bp == NULL) {
     return mm_malloc(size); 
@@ -287,21 +276,20 @@ void *mm_realloc(void *bp, size_t size){
     if( (int)size == 0 ) 
         mm_free(bp);
     return NULL;
-} 
+    } 
       size_t oldsize = GET_SIZE(HDRP(bp)); 
-      size_t newsize = size + DSIZE; // 2 words for header and footer
-      /*if newsize is less than oldsize then we just return bp */
+      size_t newsize = size + DSIZE;
+    // case1
       if(newsize <= oldsize){ 
           return bp; 
       }
-      /*if newsize is greater than oldsize */ 
+    // case2
       else { 
           size_t next_alloc = GET_ALLOC(HDRP(NEXT_BLKP(bp)));
           size_t prev_alloc = GET_ALLOC(HDRP(PREV_BLKP(bp)));
          // size_t prev_alloc = GET_ALLOC(HDRP(PREV_BLKP(bp)));
           size_t csize;
           /* next block is free and the size of the two blocks is greater than or equal the new size  */ 
-          /* then we only need to combine both the blocks  */ 
           if( !next_alloc && ( (csize = oldsize + GET_SIZE(  HDRP( NEXT_BLKP(bp) )  ) ) ) >= newsize){ 
             remove_from_list(NEXT_BLKP(bp)); 
             PUT(HDRP(bp), PACK(csize, 1)); 
@@ -319,6 +307,7 @@ void *mm_realloc(void *bp, size_t size){
             memcpy(new_ptr,bp,newsize);
             return new_ptr;  
           }*/
+        // find new pointer
           else {  
             void *new_ptr = mm_malloc(newsize);  
             place(new_ptr, newsize);
@@ -329,6 +318,7 @@ void *mm_realloc(void *bp, size_t size){
       }
 } 
 
+// add a free block to a free list
 static void add_to_list(void *bp){
     SET_PREV_FBLKP(free_listp, bp);
     SET_NEXT_FBLKP(bp, free_listp);
@@ -336,7 +326,7 @@ static void add_to_list(void *bp){
     free_listp = bp;
 }
 
-
+// remove a block from a free list
 static void remove_from_list(void *bp) {
 
     void *prev = PREV_FBLKP(bp);
@@ -359,7 +349,7 @@ static void remove_from_list(void *bp) {
 */
 
 int heap_checker(void) {
-    void *start = heap_listp;
+    void *start = heap_listp+4;
     void *curr = free_listp;
     int count_in_list = 0;
     int count_in_heap = 0;
