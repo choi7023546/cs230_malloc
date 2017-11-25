@@ -47,7 +47,7 @@ team_t team = {
 /* Basic constants and macros */ 
 #define WSIZE 4 /* Word and header/footer size (bytes) */ 
 #define DSIZE 8 /* Double word size (bytes) */ 
-#define CHUNKSIZE (1<<13) /* Extend heap by this amount (bytes) */ 
+#define CHUNKSIZE (1<<9) /* Extend heap by this amount (bytes) */ 
 
 #define MAX(x, y) ((x) > (y)? (x) : (y))
 
@@ -110,7 +110,8 @@ int mm_init(void) // no need to change
     return 0; 
 }
 
- static void *extend_heap(size_t words) // no need to change
+/*if there is no block to allocate, extend the heap*/
+ static void *extend_heap(size_t words)
  {  
     char *bp; 
     size_t size; 
@@ -135,7 +136,7 @@ int mm_init(void) // no need to change
  *     Always allocate a block whose size is a multiple of the alignment.
  */
 void *mm_malloc(size_t size) // no need to change
-{ 
+{   
     //printf("what" );
      size_t asize; /* Adjusted block size */ 
      size_t extendsize; /* Amount to extend heap if no fit */ 
@@ -173,9 +174,10 @@ void mm_free(void *bp) // no need to change
     if (bp==NULL)
         return;
     size_t size = GET_SIZE(HDRP(bp));
-
+    // make initial block to a free block.
     PUT(HDRP(bp), PACK(size, 0));
     PUT(FTRP(bp), PACK(size, 0));
+    // if before and after blocks are free, coalescing them.
     coalesce(bp); 
     //printf("hi");
 }
@@ -186,10 +188,8 @@ static void *coalesce(void *bp)
      size_t next_alloc = GET_ALLOC(HDRP(NEXT_BLKP(bp)));
      size_t size = GET_SIZE(HDRP(bp));
 
-     if (prev_alloc && next_alloc) { /* Case 1 */
+     if (prev_alloc && next_alloc) /* Case 1 */
          add_to_list(bp);
-         return bp;
-     }
 
      else if (prev_alloc && !next_alloc) { /* Case 2 */
      size += GET_SIZE(HDRP(NEXT_BLKP(bp)));
@@ -197,7 +197,6 @@ static void *coalesce(void *bp)
      PUT(HDRP(bp), PACK(size, 0));
      PUT(FTRP(bp), PACK(size,0));
      add_to_list(bp);
-     return bp;
      }
 
      else if (!prev_alloc && next_alloc) { /* Case 3 */
@@ -207,7 +206,6 @@ static void *coalesce(void *bp)
      PUT(HDRP(PREV_BLKP(bp)), PACK(size, 0));
      bp = PREV_BLKP(bp);
      add_to_list(bp);
-     return bp;
      }
 
      else { /* Case 4 */
@@ -218,9 +216,11 @@ static void *coalesce(void *bp)
      PUT(FTRP(NEXT_BLKP(bp)), PACK(size, 0));
      bp = PREV_BLKP(bp);
      add_to_list(bp);
-     return bp;
      }
+
+     return bp;
  }
+
 
 /*
  * mm_realloc - Implemented simply in terms of mm_malloc and mm_free
@@ -280,71 +280,53 @@ static void place(void *bp, size_t asize)
 }
 
 void *mm_realloc(void *bp, size_t size){
-  
   if (bp == NULL) {
     return mm_malloc(size); 
   }
-  if ( (int)size < 0 ) 
-    return NULL; 
-
-  else if( (int)size == 0 ){ 
-
-    mm_free(bp);
-    return NULL; 
-
-  } 
-
-  else if (size > 0){ 
-
+  if ( (int) size <= 0 ){
+    if( (int)size == 0 ) 
+        mm_free(bp);
+    return NULL;
+} 
       size_t oldsize = GET_SIZE(HDRP(bp)); 
-      size_t newsize = size + 2 * WSIZE; // 2 words for header and footer
+      size_t newsize = size + DSIZE; // 2 words for header and footer
       /*if newsize is less than oldsize then we just return bp */
       if(newsize <= oldsize){ 
           return bp; 
       }
-
       /*if newsize is greater than oldsize */ 
       else { 
-          size_t next_alloc = GET_ALLOC(HDRP(NEXT_BLKP(bp))); 
+          size_t next_alloc = GET_ALLOC(HDRP(NEXT_BLKP(bp)));
+          size_t prev_alloc = GET_ALLOC(HDRP(PREV_BLKP(bp)));
          // size_t prev_alloc = GET_ALLOC(HDRP(PREV_BLKP(bp)));
           size_t csize;
           /* next block is free and the size of the two blocks is greater than or equal the new size  */ 
           /* then we only need to combine both the blocks  */ 
-
           if( !next_alloc && ( (csize = oldsize + GET_SIZE(  HDRP( NEXT_BLKP(bp) )  ) ) ) >= newsize){ 
             remove_from_list(NEXT_BLKP(bp)); 
             PUT(HDRP(bp), PACK(csize, 1)); 
             PUT(FTRP(bp), PACK(csize, 1)); 
             return bp; 
 
-          } /* else if ( !prev_alloc && ( (csize = oldsize + GET_SIZE( HDRP(PREV_BLKP(bp) ) ) ) ) >= newsize ) {
+          }
+       /*   else if ( !prev_alloc && ( (csize = oldsize + GET_SIZE( HDRP(PREV_BLKP(bp) ) ) ) ) >= newsize ) {
+            remove_from_list(PREV_BLKP(bp));
             void *new_ptr = PREV_BLKP(bp);
+            PUT(HDRP(new_ptr), PACK(csize,1));
+            PUT(FTRP(new_ptr), PACK(csize,1));
             mm_free(bp);
-            place(new_ptr,newsize);
+            //place(new_ptr,newsize);
             memcpy(new_ptr,bp,newsize);
             return new_ptr;  
-          } */
-
+          }*/
           else {  
-
             void *new_ptr = mm_malloc(newsize);  
-
             place(new_ptr, newsize);
-
             memcpy(new_ptr, bp, newsize); 
-
             mm_free(bp); 
-
             return new_ptr; 
-
           } 
-
       }
-
-  }else 
-
-    return NULL;
-
 } 
 
 static void add_to_list(void *bp){
@@ -353,7 +335,6 @@ static void add_to_list(void *bp){
     SET_PREV_FBLKP(bp,NULL);
     free_listp = bp;
 }
-
 
 
 static void remove_from_list(void *bp) {
