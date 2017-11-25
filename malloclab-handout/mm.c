@@ -371,4 +371,39 @@ static void remove_from_list(void *bp) {
     }
 
  }
+/* if the heap is consistent, return none zero, else, return 0.
+1. all blocks in a free list are not allocated.
+2.  
+
+*/
+
+int heap_checker(void) {
+    void *start = heap_listp;
+    void *curr = free_listp;
+    int count_in_list = 0;
+    int count_in_heap = 0;
+    
+    // Is every block in the free list marked as free?
+    while(curr!=NULL) {
+        if(GET_ALLOC(curr)) {
+            printf("error\n");
+            return 0;
+        }
+        curr = NEXT_FBLKP(curr);
+        count_in_list++; 
+    }
+    //Is every free block actually in the free list? 
+    while(start!=NULL) {
+        if(!GET_ALLOC(start)) {
+            count_in_heap++;
+        }
+        start = NEXT_BLKP(start);
+        
+    }
+    if(count_in_list != count_in_heap) {
+        printf("error");
+        return 0;
+    }
+    return 1;       
+}
 
