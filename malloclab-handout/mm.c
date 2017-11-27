@@ -1,10 +1,9 @@
 /*
- * mm-naive.c - The fastest, least memory-efficient malloc package.
+ * mm.c
  * 
- * In this naive approach, a block is allocated by simply incrementing
- * the brk pointer.  A block is pure payload. There are no headers or
- * footers.  Blocks are never coalesced or reused. Realloc is
- * implemented directly using mm_malloc and mm_free.
+ * We used an explicit free list to keep tracking memory.  When we insert a new free block to the free list, it places to the head of list. 
+ * Also, a first-fit method was used to construct a mm_malloc and mm_realloc function.
+ * When we place a certain size of block, if possible, the block is split and re-added to the free list. Otherwise, just change the size of block.
  *
  * NOTE TO STUDENTS: Replace this header comment with your own header
  * comment that gives a high level description of your solution.
@@ -89,7 +88,7 @@ static void *find_fit(size_t asize);
 static void *coalesce(void *bp);
 static void add_to_list(void *bp);
 static void remove_from_list(void *bp);
-int heap_checker(void);
+int mm_check(void);
 /* 
  * mm_init - initialize the malloc package.
  */
@@ -161,7 +160,7 @@ void *mm_malloc(size_t size) // no need to change
     if ((bp = extend_heap(extendsize/WSIZE)) == NULL) 
         return NULL; 
     place(bp, asize); 
-    //heap_checker();
+   // mm_check();
     return bp; 
     //printf("hi2");
 }
@@ -286,7 +285,6 @@ void *mm_realloc(void *bp, size_t size){
     // case2
       else { 
           size_t next_alloc = GET_ALLOC(HDRP(NEXT_BLKP(bp)));
-          size_t prev_alloc = GET_ALLOC(HDRP(PREV_BLKP(bp)));
          // size_t prev_alloc = GET_ALLOC(HDRP(PREV_BLKP(bp)));
           size_t csize;
           /* next block is free and the size of the two blocks is greater than or equal the new size  */ 
@@ -343,38 +341,49 @@ static void remove_from_list(void *bp) {
 
  }
 /* if the heap is consistent, return none zero, else, return 0.
-1. all blocks in a free list are not allocated.
-2.  
-
+1. Is every block in the free list marked as free?
+2. Is every free block actually in the free list?
+3. Do the pointers in the free list point to valid free blocks?
+4. Is every free block actually in the free list?
 */
 
-int heap_checker(void) {
-    void *start = heap_listp+4;
-    void *curr = free_listp;
-    int count_in_list = 0;
+
+int mm_check(void) {
+    void *start = heap_listp;
+    void *free = free_listp;
     int count_in_heap = 0;
+    int count_in_free = 0;
     
-    // Is every block in the free list marked as free?
-    while(curr!=NULL) {
-        if(GET_ALLOC(curr)) {
+    while(start!=NULL){
+    //Do the pointers in a heap block point to valid heap addresses? (not out of bound)
+      if (start < mem_heap_lo() || start >= mem_heap_hi())
+        printf("error");
+        return 0;
+      if (!GET_ALLOC(HDRP(start))) {
+        count_in_heap++;
+        }
+      start = NEXT_BLKP(start);
+    }
+
+    while (free!=NULL) {
+        // Is every free block actually in the free list?
+        if(GET_ALLOC(HDRP(free))) {
+            printf("error\n");
+            return 0;
+        } 
+        // Do the pointers in the free list point to valid free blocks?
+        if( NEXT_FBLKP(free) &&  !GET_ALLOC(HDRP(NEXT_FBLKP(free))) ) {
             printf("error\n");
             return 0;
         }
-        curr = NEXT_FBLKP(curr);
-        count_in_list++; 
+    free = NEXT_FBLKP(free);
+    count_in_free++;
     }
-    //Is every free block actually in the free list? 
-    while(start!=NULL) {
-        if(!GET_ALLOC(start)) {
-            count_in_heap++;
-        }
-        start = NEXT_BLKP(start);
-        
-    }
-    if(count_in_list != count_in_heap) {
-        printf("error");
+    //Is every free block actually in the free list?
+    if(count_in_heap!=count_in_free) {
+        printf("error\n");
         return 0;
     }
-    return 1;       
+    return 1;
 }
 
